@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>400字小説作成アプリ</title>
+  <meta name="description" content="条件を入れるだけで、約400字のショートショートを生成します。" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="header">
+    <div class="container header-inner">
+      <div class="brand">
+        <div class="title">400字小説作成アプリ</div>
+        <div class="sub">条件を入れて、約400字の物語を生成</div>
+      </div>
+      <a class="link" href="https://ichimoto-yoshio.com/" target="_blank" rel="noopener noreferrer">
+        作品集（ルートサイト）へ →
+      </a>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h1>条件入力</h1>
+
+      {% if error %}
+        <div class="alert">{{ error }}</div>
+      {% endif %}
+
+      <form method="post" action="/generate" class="form">
+        <div class="grid">
+          <label>
+            <span>テーマ</span>
+            <input name="theme" value="{{ form.theme or '' }}" placeholder="例：家族、AI、酒場、月面生活…">
+          </label>
+
+          <label>
+            <span>ジャンル</span>
+            <input name="genre" value="{{ form.genre or '' }}" placeholder="例：SF、日常、童話、ホラー…">
+          </label>
+
+          <label>
+            <span>主人公</span>
+            <input name="protagonist" value="{{ form.protagonist or '' }}" placeholder="例：定年後の男、保育士、営業マン…">
+          </label>
+
+          <label>
+            <span>文体/トーン</span>
+            <input name="tone" value="{{ form.tone or '' }}" placeholder="例：星新一っぽく、しっとり、軽快…">
+          </label>
+
+          <label class="full">
+            <span>どんでん返し/仕掛け（任意）</span>
+            <input name="twist" value="{{ form.twist or '' }}" placeholder="例：最後に一言で価値観が反転する、伏線回収…">
+          </label>
+
+          <label class="full">
+            <span>入れないでほしい要素（任意）</span>
+            <input name="forbidden" value="{{ form.forbidden or '' }}" placeholder="例：暴力は避けたい、説教はNG、固有名詞は避ける…">
+          </label>
+        </div>
+
+        <button class="btn" type="submit">生成する</button>
+      </form>
+    </section>
+
+    {% if story %}
+    <section class="card">
+      <h2>生成結果</h2>
+      <div class="story" id="story">{{ story }}</div>
+      <div class="actions">
+        <button class="btn-secondary" type="button" onclick="copyStory()">コピー</button>
+        <a class="btn-secondary" href="/">条件をリセット</a>
+      </div>
+    </section>
+    {% endif %}
+  </main>
+
+  <footer class="footer">
+    <div class="container">© 一本吉夫（いちもとよしお）</div>
+  </footer>
+
+  <script>
+    function copyStory(){
+      const text = document.getElementById("story")?.innerText || "";
+      navigator.clipboard.writeText(text);
+      alert("コピーしました");
+    }
+  </script>
+</body>
+</html>
