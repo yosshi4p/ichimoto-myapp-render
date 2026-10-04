@@ -3,3 +3,4 @@ gunicorn
 openai
 flask-sqlalchemy
 psycopg2-binary
+psycopg[binary]
