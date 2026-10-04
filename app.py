@@ -98,6 +98,14 @@ def generate_story(
 def home():
     return render_template("index.html", story=None, error=None, form={})
 
+@app.get("/index.html")
+def index_html():
+    return home()
+
+@app.get("/ai-app-lab.html")
+def ai_app_lab():
+    return render_template("ai-app-lab.html")
+
 
 @app.post("/generate")
 def generate():
