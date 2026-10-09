@@ -1,0 +1,84 @@
+
+<!doctype html>
+<html lang="ja">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>作品登録</title>
+
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 20px;
+            line-height: 1.7;
+        }
+
+        h1 {
+            margin-bottom: 30px;
+        }
+
+        label {
+            display: block;
+            margin-top: 18px;
+            font-weight: bold;
+        }
+
+        input,
+        textarea {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px;
+            margin-top: 5px;
+            font-size: 16px;
+        }
+
+        textarea {
+            height: 300px;
+        }
+
+        button {
+            margin-top: 25px;
+            padding: 12px 30px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>400字小説 作品登録</h1>
+
+    <form method="POST">
+
+        <label>テーマ</label>
+        <input type="text" name="theme">
+
+        <label>ジャンル</label>
+        <input type="text" name="genre">
+
+        <label>主人公</label>
+        <input type="text" name="protagonist">
+
+        <label>文体・トーン</label>
+        <input type="text" name="tone">
+
+        <label>どんでん返し・仕掛け</label>
+        <input type="text" name="twist">
+
+        <label>入れないでほしい要素</label>
+        <input type="text" name="forbidden">
+
+        <label>小説本文</label>
+        <textarea name="content" required></textarea>
+
+        <button type="submit">DBへ登録する</button>
+
+    </form>
+
+</body>
+
+</html>
