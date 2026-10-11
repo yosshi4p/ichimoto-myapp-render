@@ -1,0 +1,54 @@
+
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1">
+  <title>400字小説集 | 一本吉夫</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f7f7f5;
+      color: #333;
+      margin: 0;
+    }
+    main {
+      max-width: 760px;
+      margin: 40px auto;
+      padding: 20px;
+    }
+    h1 { text-align: center; }
+    .story {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 24px;
+      margin: 20px 0;
+    }
+    .content {
+      white-space: pre-wrap;
+      line-height: 1.9;
+    }
+    .genre { color: #777; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>400字小説集</h1>
+    <p>一本吉夫の短い物語たち。</p>
+
+    {% for story in stories %}
+      <article class="story">
+        <h2>{{ story.theme or "無題" }}</h2>
+        <p class="genre">
+          {{ story.genre or "" }}
+        </p>
+        <div class="content">{{ story.content }}</div>
+      </article>
+    {% else %}
+      <p>まだ作品が登録されていません。</p>
+    {% endfor %}
+  </main>
+</body>
+</html>
