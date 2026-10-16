@@ -392,6 +392,46 @@ def public_stories():
         stories=stories
     )
 
+
+# =========================================================
+# 公開用 作品一覧API
+# =========================================================
+
+@app.get("/api/stories")
+def api_stories():
+
+    # 公開を許可した作品IDだけを対象にする
+    public_ids = {
+        int(x.strip())
+        for x in os.getenv("PUBLIC_STORY_IDS", "").split(",")
+        if x.strip().isdigit()
+    }
+
+    stories = Story.query.filter(
+        Story.id.in_(public_ids)
+    ).order_by(
+        Story.id.desc()
+    ).all()
+
+    data = []
+
+    for story in stories:
+        data.append({
+            "id": story.id,
+            "title": story.title or "無題",
+            "excerpt": story.content[:65]
+        })
+
+    response = app.json.response(data)
+
+    # 公開サイトからの読み込みを許可
+    response.headers["Access-Control-Allow-Origin"] = (
+        "https://www.ichimoto-yoshio.com"
+    )
+
+    return response
+
+
 # =========================================================
 # AI小説生成
 # =========================================================
