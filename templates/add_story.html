@@ -5,7 +5,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>作品登録</title>
+    <title>作品登録 | 400字小説集</title>
 
     <style>
         body {
@@ -17,6 +17,11 @@
         }
 
         h1 {
+            margin-bottom: 10px;
+        }
+
+        .description {
+            color: #666;
             margin-bottom: 30px;
         }
 
@@ -33,17 +38,39 @@
             padding: 10px;
             margin-top: 5px;
             font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
         }
 
         textarea {
             height: 300px;
         }
 
+        .required {
+            color: #c0392b;
+        }
+
         button {
             margin-top: 25px;
             padding: 12px 30px;
             font-size: 16px;
+            background: #245b81;
+            color: white;
+            border: none;
+            border-radius: 5px;
             cursor: pointer;
+        }
+
+        button:hover {
+            background: #17415f;
+        }
+
+        .links {
+            margin-top: 25px;
+        }
+
+        .error {
+            color: #c0392b;
         }
     </style>
 </head>
@@ -52,33 +79,65 @@
 
     <h1>400字小説 作品登録</h1>
 
+    <p class="description">
+        小説作品をPostgreSQLデータベースに登録します。
+    </p>
+
+    {% if error %}
+    <p class="error">{{ error }}</p>
+    {% endif %}
+
     <form method="POST">
 
-        <label>テーマ</label>
-        <input type="text" name="theme">
+        <label for="title">
+            作品タイトル
+            <span class="required">※必須</span>
+        </label>
+        <input
+            type="text"
+            id="title"
+            name="title"
+            maxlength="200"
+            required
+        >
 
-        <label>ジャンル</label>
-        <input type="text" name="genre">
+        <label for="theme">テーマ</label>
+        <input type="text" id="theme" name="theme">
 
-        <label>主人公</label>
-        <input type="text" name="protagonist">
+        <label for="genre">ジャンル</label>
+        <input type="text" id="genre" name="genre">
 
-        <label>文体・トーン</label>
-        <input type="text" name="tone">
+        <label for="protagonist">主人公</label>
+        <input type="text" id="protagonist" name="protagonist">
 
-        <label>どんでん返し・仕掛け</label>
-        <input type="text" name="twist">
+        <label for="tone">文体・トーン</label>
+        <input type="text" id="tone" name="tone">
 
-        <label>入れないでほしい要素</label>
-        <input type="text" name="forbidden">
+        <label for="twist">どんでん返し・仕掛け</label>
+        <input type="text" id="twist" name="twist">
 
-        <label>小説本文</label>
-        <textarea name="content" required></textarea>
+        <label for="forbidden">入れないでほしい要素</label>
+        <input type="text" id="forbidden" name="forbidden">
+
+        <label for="content">
+            小説本文
+            <span class="required">※必須</span>
+        </label>
+        <textarea
+            id="content"
+            name="content"
+            required
+        ></textarea>
 
         <button type="submit">DBへ登録する</button>
 
     </form>
 
-</body>
+    <div class="links">
+        <a href="/admin/list">登録済み作品一覧を見る</a>
+        ｜
+        <a href="/admin/logout">ログアウト</a>
+    </div>
 
+</body>
 </html>

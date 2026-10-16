@@ -12,6 +12,7 @@ from flask import (
     session,
 )
 from flask_sqlalchemy import SQLAlchemy
+from markupsafe import escape
 
 # OpenAI SDK（公式）
 from openai import OpenAI
@@ -50,6 +51,8 @@ db = SQLAlchemy(app)
 
 class Story(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    # 作品タイトル（DBには追加済み）
+    title = db.Column(db.String(200))
     theme = db.Column(db.String(100))
     genre = db.Column(db.String(100))
     protagonist = db.Column(db.String(100))
@@ -259,7 +262,12 @@ def add_story():
                 error="小説本文を入力してください。",
             )
 
+        # タイトル入力欄がまだない場合はテーマを仮タイトルにする
+        title = request.form.get("title", "").strip()
+        theme = request.form.get("theme", "").strip()
+
         story = Story(
+            title=title or theme or "無題",
             theme=request.form.get(
                 "theme",
                 "",
@@ -348,15 +356,19 @@ def admin_list():
         </p>
 
         <p>
-        テーマ: {story.theme or ""}
+        タイトル: {escape(story.title or "")}
         </p>
 
         <p>
-        ジャンル: {story.genre or ""}
+        テーマ: {escape(story.theme or "")}
         </p>
 
         <p>
-        本文: {story.content}
+        ジャンル: {escape(story.genre or "")}
+        </p>
+
+        <p>
+        本文: {escape(story.content)}
         </p>
         """
 
@@ -465,6 +477,8 @@ def generate():
     # ---------------------------------------------
 
     saved_story = Story(
+        # AI生成画面にはタイトル欄がないので、当面テーマをタイトルとして使う
+        title=form["theme"] or "無題",
         theme=form["theme"],
         genre=form["genre"],
         protagonist=form["protagonist"],
