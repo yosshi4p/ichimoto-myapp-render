@@ -431,6 +431,33 @@ def api_stories():
 
     return response
 
+# =========================================================
+# 公開用 小説個別ページ
+# =========================================================
+
+@app.get("/stories/<int:story_id>")
+def story_detail(story_id):
+
+    # 公開を許可した作品IDを取得
+    public_ids = {
+        int(x.strip())
+        for x in os.getenv("PUBLIC_STORY_IDS", "").split(",")
+        if x.strip().isdigit()
+    }
+
+    # 指定された作品をDBから取得
+    story = db.session.get(Story, story_id)
+
+    # 作品がない、または非公開なら404
+    if story is None or story.id not in public_ids:
+        return "作品が見つかりません", 404
+
+    # 個別ページ用HTMLに作品を渡す
+    return render_template(
+        "story_detail.html",
+        story=story
+    )
+
 
 # =========================================================
 # AI小説生成
