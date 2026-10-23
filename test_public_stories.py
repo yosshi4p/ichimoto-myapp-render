@@ -81,6 +81,54 @@ class PublicStoryVisibilityTest(unittest.TestCase):
             }],
         )
 
+    def test_api_allows_sakura_origin(self):
+        origin = "https://ichimoto-yoshio.com"
+
+        response = self.client.get(
+            "/api/stories",
+            headers={"Origin": origin},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers.get("Access-Control-Allow-Origin"),
+            origin,
+        )
+        self.assertIn("Origin", response.vary)
+
+    def test_api_allows_render_origin(self):
+        origin = "https://www.ichimoto-yoshio.com"
+
+        response = self.client.get(
+            "/api/stories",
+            headers={"Origin": origin},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers.get("Access-Control-Allow-Origin"),
+            origin,
+        )
+        self.assertIn("Origin", response.vary)
+
+    def test_api_does_not_allow_unapproved_origin(self):
+        response = self.client.get(
+            "/api/stories",
+            headers={"Origin": "https://example.com"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+
+    def test_cors_is_not_added_to_non_api_routes(self):
+        response = self.client.get(
+            "/stories",
+            headers={"Origin": "https://ichimoto-yoshio.com"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+
     def test_public_story_detail_is_available(self):
         response = self.client.get("/stories/1")
 

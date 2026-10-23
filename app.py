@@ -412,6 +412,12 @@ def public_stories():
 # 公開用 作品一覧API
 # =========================================================
 
+STORY_API_ALLOWED_ORIGINS = frozenset({
+    "https://ichimoto-yoshio.com",
+    "https://www.ichimoto-yoshio.com",
+})
+
+
 @app.get("/api/stories")
 def api_stories():
     stories = _public_stories_query().order_by(
@@ -429,10 +435,11 @@ def api_stories():
 
     response = app.json.response(data)
 
-    # 公開サイトからの読み込みを許可
-    response.headers["Access-Control-Allow-Origin"] = (
-        "https://www.ichimoto-yoshio.com"
-    )
+    # 許可した公開サイトからの読み込みだけを許可
+    origin = request.headers.get("Origin")
+    if origin in STORY_API_ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.vary.add("Origin")
 
     return response
 
