@@ -379,10 +379,25 @@ def admin_list():
 # 公開用 400字小説一覧
 # =========================================================
 
+def _get_public_story_ids() -> set[int]:
+    """環境変数から公開を許可した作品IDを取得する。"""
+    return {
+        int(value.strip())
+        for value in os.getenv("PUBLIC_STORY_IDS", "").split(",")
+        if value.strip().isdigit()
+    }
+
+
+def _public_stories_query():
+    """公開作品だけを対象にしたクエリを返す。"""
+    return Story.query.filter(
+        Story.id.in_(_get_public_story_ids())
+    )
+
 @app.route("/stories")
 def public_stories():
-    # DBから全作品を新しい順に取得
-    stories = Story.query.order_by(
+    # 公開作品だけを新しい順に取得
+    stories = _public_stories_query().order_by(
         Story.id.desc()
     ).all()
 
@@ -399,17 +414,7 @@ def public_stories():
 
 @app.get("/api/stories")
 def api_stories():
-
-    # 公開を許可した作品IDだけを対象にする
-    public_ids = {
-        int(x.strip())
-        for x in os.getenv("PUBLIC_STORY_IDS", "").split(",")
-        if x.strip().isdigit()
-    }
-
-    stories = Story.query.filter(
-        Story.id.in_(public_ids)
-    ).order_by(
+    stories = _public_stories_query().order_by(
         Story.id.desc()
     ).all()
 
@@ -437,19 +442,13 @@ def api_stories():
 
 @app.get("/stories/<int:story_id>")
 def story_detail(story_id):
-
-    # 公開を許可した作品IDを取得
-    public_ids = {
-        int(x.strip())
-        for x in os.getenv("PUBLIC_STORY_IDS", "").split(",")
-        if x.strip().isdigit()
-    }
-
-    # 指定された作品をDBから取得
-    story = db.session.get(Story, story_id)
+    # 公開作品の中から指定された作品を取得
+    story = _public_stories_query().filter(
+        Story.id == story_id
+    ).one_or_none()
 
     # 作品がない、または非公開なら404
-    if story is None or story.id not in public_ids:
+    if story is None:
         return "作品が見つかりません", 404
 
     # 個別ページ用HTMLに作品を渡す
