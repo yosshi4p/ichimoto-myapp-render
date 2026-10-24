@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
+import hmac
 
 from flask import (
     Flask,
@@ -10,9 +12,10 @@ from flask import (
     redirect,
     url_for,
     session,
+    abort,
+    flash,
 )
 from flask_sqlalchemy import SQLAlchemy
-from markupsafe import escape
 
 # OpenAI SDK（公式）
 from openai import OpenAI
@@ -315,6 +318,49 @@ def add_story():
 
 
 # =========================================================
+# 作品編集（既存の作品を同じIDで更新）
+# =========================================================
+
+@app.route("/admin/edit/<int:story_id>", methods=["GET", "POST"])
+def edit_story(story_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin_login"))
+
+    story = db.get_or_404(Story, story_id)
+    if "edit_csrf_token" not in session:
+        session["edit_csrf_token"] = secrets.token_hex(32)
+
+    fields = {
+        "title": 200, "theme": 100, "genre": 100,
+        "protagonist": 100, "tone": 100, "twist": 200,
+        "forbidden": 200,
+    }
+    form = {name: getattr(story, name) or "" for name in (*fields, "content")}
+    error = None
+
+    if request.method == "POST":
+        token = request.form.get("csrf_token", "")
+        if not hmac.compare_digest(token, session["edit_csrf_token"]):
+            abort(400)
+        form = {name: request.form.get(name, "").strip() for name in form}
+        if not form["title"] or not form["content"]:
+            error = "タイトルと小説本文を入力してください。"
+        elif any(len(form[name]) > limit for name, limit in fields.items()):
+            error = "入力できる文字数を超えています。各欄の上限を確認してください。"
+        else:
+            for name, value in form.items():
+                setattr(story, name, value)
+            db.session.commit()
+            flash("作品を保存しました。")
+            return redirect(url_for("admin_list"))
+
+    return render_template(
+        "edit_story.html", story=story, form=form, error=error,
+        csrf_token=session["edit_csrf_token"],
+    ), (400 if error else 200)
+
+
+# =========================================================
 # DB登録作品一覧（管理用）
 # =========================================================
 
@@ -332,47 +378,7 @@ def admin_list():
         Story.id.desc()
     ).all()
 
-    html = """
-    <h1>DB登録作品一覧</h1>
-
-    <p>
-        <a href="/admin/add">
-            新しい作品を登録
-        </a>
-         |
-        <a href="/admin/logout">
-            ログアウト
-        </a>
-    </p>
-    """
-
-    for story in stories:
-
-        html += f"""
-        <hr>
-
-        <p>
-        ID: {story.id}
-        </p>
-
-        <p>
-        タイトル: {escape(story.title or "")}
-        </p>
-
-        <p>
-        テーマ: {escape(story.theme or "")}
-        </p>
-
-        <p>
-        ジャンル: {escape(story.genre or "")}
-        </p>
-
-        <p>
-        本文: {escape(story.content)}
-        </p>
-        """
-
-    return html
+    return render_template("admin_list.html", stories=stories)
 
 
 # =========================================================

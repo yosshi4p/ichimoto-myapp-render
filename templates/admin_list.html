@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DB登録作品一覧</title>
+<style>
+body{font-family:sans-serif;background:#f7f7f5;color:#333}main{max-width:900px;margin:32px auto;padding:20px}article{background:white;border:1px solid #ddd;border-radius:10px;padding:24px;margin:20px 0}.content{white-space:pre-wrap;line-height:1.8}.message{color:#165c35}
+</style>
+<main>
+<h1>DB登録作品一覧</h1>
+<p><a href="{{ url_for('add_story') }}">新しい作品を登録</a> | <a href="{{ url_for('admin_logout') }}">ログアウト</a></p>
+{% for message in get_flashed_messages() %}<p class="message" role="status">{{ message }}</p>{% endfor %}
+{% for story in stories %}
+<article>
+<p>ID: {{ story.id }}</p>
+<h2>{{ story.title or '無題' }}</h2>
+<p>テーマ: {{ story.theme or '' }} ／ ジャンル: {{ story.genre or '' }}</p>
+<p class="content">{{ story.content }}</p>
+<a href="{{ url_for('edit_story', story_id=story.id) }}">この作品を編集</a>
+</article>
+{% else %}<p>登録された作品はありません。</p>{% endfor %}
+</main>
+</html>
