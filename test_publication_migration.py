@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -70,6 +71,63 @@ class PublicationMigrationTest(unittest.TestCase):
                 migrate_publication_status(empty_engine)
         finally:
             empty_engine.dispose()
+
+
+@unittest.skipUnless(
+    os.environ.get("TEST_POSTGRES_URL"),
+    "TEST_POSTGRES_URL is required for PostgreSQL migration tests",
+)
+class PostgreSQLPublicationMigrationTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+        with cls.engine.begin() as connection:
+            connection.execute(text("DROP TABLE IF EXISTS story"))
+            connection.execute(text(
+                "CREATE TABLE story ("
+                "id INTEGER PRIMARY KEY, title VARCHAR(200), content TEXT NOT NULL)"
+            ))
+            connection.execute(text(
+                "INSERT INTO story (id, title, content) VALUES "
+                "(1, '公開予定1', '本文1'), (2, '公開予定2', '本文2')"
+            ))
+
+    @classmethod
+    def tearDownClass(cls):
+        with cls.engine.begin() as connection:
+            connection.execute(text("DROP TABLE IF EXISTS story"))
+        cls.engine.dispose()
+
+    def test_postgresql_preserves_rows_publishes_all_and_is_idempotent(self):
+        with self.engine.connect() as connection:
+            rows_before = connection.execute(text(
+                "SELECT id, title, content FROM story ORDER BY id"
+            )).all()
+
+        self.assertTrue(migrate_publication_status(self.engine))
+        with self.engine.connect() as connection:
+            rows_after_migration = connection.execute(text(
+                "SELECT id, title, content, is_public FROM story ORDER BY id"
+            )).all()
+        self.assertEqual(
+            rows_after_migration,
+            [(*row, True) for row in rows_before],
+        )
+
+        with self.engine.begin() as connection:
+            connection.execute(text(
+                "UPDATE story SET is_public = FALSE WHERE id = 1"
+            ))
+
+        self.assertFalse(migrate_publication_status(self.engine))
+        with self.engine.connect() as connection:
+            rows_after_rerun = connection.execute(text(
+                "SELECT id, title, content, is_public FROM story ORDER BY id"
+            )).all()
+        self.assertEqual(
+            rows_after_rerun,
+            [(*rows_before[0], False), (*rows_before[1], True)],
+        )
 
 
 if __name__ == "__main__":
