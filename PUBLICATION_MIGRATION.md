@@ -1,48 +1,155 @@
 # 公開状態のDB移行手順
 
-この移行は `story.is_public` 列を追加し、移行時点の既存作品をすべて公開状態にします。移行後に作成する作品はアプリ側の既定値により非公開です。
-PostgreSQLとSQLiteの両方に対応しています。列が既にある場合は何も更新しないため、再実行しても管理画面で変更した公開状態は上書きされません。作品行を削除するSQLは実行しません。
+## 先に確認すること
 
-## 本番反映前
+この移行は `story.is_public` 列を追加し、**移行時点に存在する全作品を公開**します。移行後に作成する作品は非公開が既定値です。
 
-1. Render PostgreSQLのリカバリ／バックアップが利用可能なら、最新の復元ポイントを確認する。
-2. RenderのDB画面からExternal Database URLを一時的に取得し、ローカルでカスタム形式のバックアップを作る（URLやバックアップファイルはGitに追加しない）。
+旧版は Render Web Service の `PUBLIC_STORY_IDS` に含まれるIDだけを公開していました。そのため、現在の値が全作品IDを含んでいない場合、移行直後は公開作品が増えます。現在の値を記録し、全作品公開でよいと確認できるまで移行しないでください。
 
-```shell
-pg_dump --format=custom --no-owner --no-acl --file=publication-before.dump "<External Database URL>"
-pg_restore --list publication-before.dump
+スクリプトが行う処理は次の2つだけです。
+
+1. `story.is_public BOOLEAN NOT NULL DEFAULT FALSE` を追加する。
+2. 既存の `story` 行を `UPDATE story SET is_public = TRUE` で全件公開する。
+
+列追加と全件更新は1トランザクションです。作品行を削除せず、`id`、`title`、`content` を更新しません。`is_public` 列が既にあれば何も変更しないため、再実行で管理画面の設定を上書きしません。
+
+## 中止条件
+
+次のどれかに該当する場合は、本番移行を開始しません。
+
+- 復元可能なバックアップを取得していない。
+- バックアップを別の空DBへ復元し、内容を確認していない。
+- 現在の `PUBLIC_STORY_IDS` を記録していない。
+- 「既存作品をすべて公開する」ことを確認できていない。
+- 移行前スナップショットのCSVとSHA-256を保存していない。
+- 接続先が本番DBであることを、DB名とホスト名で再確認していない。
+
+## 1. Renderのバックアップと復元
+
+### 推奨: RenderのPoint-in-Time Recovery（PITR）
+
+有料のRender Postgresでは、Dashboardの対象DBにある **Recovery** ページから復元時刻を指定できます。PITRは元DBを上書きせず、新しいDBインスタンスを作ります。復元後は新しいDBの `PSQL Command` で件数と内容を確認します。
+
+利用できる復元期間はワークスペースプランにより異なり、FreeのDBではPITRを利用できません。移行直前の時刻が復元可能範囲に入っていることをDashboardで確認してください。
+
+### 持ち出し可能な論理バックアップ
+
+有料DBでは、対象DBの **Recovery** ページで **Create export** を実行し、完成した `.dir.tar.gz` をローカルへダウンロードします。Render上のエクスポート保持期間だけに頼らず、安全な場所へ保管してください。
+
+Free DB、または手元でもバックアップを保持する場合は、対象DBのExternal Database URLをローカル端末だけで環境変数へ設定し、カスタム形式で取得します。URLをこの文書、Git、チャット、画面共有、CIログへ貼り付けないでください。
+
+```powershell
+$secureUrl = Read-Host "External Database URL" -AsSecureString
+$credential = [pscredential]::new("unused", $secureUrl)
+$env:ICHIMOTO_DATABASE_URL = $credential.GetNetworkCredential().Password
+Remove-Variable secureUrl, credential
+
+pg_dump --dbname="$env:ICHIMOTO_DATABASE_URL" --schema=public --format=custom --no-owner --no-acl --file=publication-before.dump
+pg_restore --list publication-before.dump | Out-File -Encoding utf8 publication-before.list.txt
+Get-Item publication-before.dump
+Get-FileHash -Algorithm SHA256 publication-before.dump
 ```
 
-3. PR #2のブランチをローカルにチェックアウトしたまま、本番 `DATABASE_URL` を一時的に設定し、PRをマージする前に次を実行する。
+`publication-before.dump`、一覧、後述のCSVは機密データです。リポジトリ外へ保存し、Gitへ追加しません。
 
-```shell
+### 復元テスト（必須）
+
+復元先には、使い捨ての**空の**PostgreSQLデータベースを用意します。本番DBを復元先に指定してはいけません。Renderの論理エクスポートを復元する場合は、アーカイブを展開して `pg_restore --format=directory` を使用します。上記のカスタム形式を復元する例は次のとおりです。
+
+```powershell
+$secureRestoreUrl = Read-Host "Empty restore-test database URL" -AsSecureString
+$restoreCredential = [pscredential]::new("unused", $secureRestoreUrl)
+$env:ICHIMOTO_RESTORE_URL = $restoreCredential.GetNetworkCredential().Password
+Remove-Variable secureRestoreUrl, restoreCredential
+
+pg_restore --dbname="$env:ICHIMOTO_RESTORE_URL" --verbose --no-owner --no-privileges --format=custom publication-before.dump
+psql "$env:ICHIMOTO_RESTORE_URL" -c "SELECT COUNT(*) AS story_count FROM story;"
+psql "$env:ICHIMOTO_RESTORE_URL" -c "SELECT id, title, length(content) AS content_length FROM story ORDER BY id;"
+```
+
+復元が成功し、件数と代表的な作品が確認できたら復元テスト完了です。復元先に既存データがある場合は実行せず、空DBを作り直してください。
+
+## 2. 現在の公開設定との差を確認
+
+よっちんがRender DashboardでWeb Serviceの `PUBLIC_STORY_IDS` を開き、値を安全なローカルメモへ記録します。値そのものをGitHubやチャットへ貼り付ける必要はありません。
+
+本番DBを読み取り専用で確認し、全作品IDを保存します。
+
+```powershell
+psql "$env:ICHIMOTO_DATABASE_URL" -c "SELECT id, title FROM story ORDER BY id;"
+```
+
+- 現在公開: `PUBLIC_STORY_IDS` に含まれるIDだけ。
+- 移行直後: `story` に存在するIDすべて。
+- 差分: `story` の全IDから `PUBLIC_STORY_IDS` を除いたもの。これらが新たに公開されます。
+
+下書き、テスト投稿、個人情報を含む作品が差分に1件でもあれば、全件公開仕様のまま移行してよいか判断するまで中止します。
+
+## 3. 移行前スナップショット
+
+移行直前に、比較対象をCSVへ保存します。本文を含むため、ファイルはGitへ追加しません。
+
+```powershell
+psql "$env:ICHIMOTO_DATABASE_URL" -c "\copy (SELECT id, title, content FROM story ORDER BY id) TO 'story-before.csv' WITH (FORMAT csv, HEADER true)"
+psql "$env:ICHIMOTO_DATABASE_URL" -c "SELECT COUNT(*) AS story_count, MIN(id) AS min_id, MAX(id) AS max_id FROM story;"
+Get-FileHash -Algorithm SHA256 story-before.csv
+```
+
+CSVのSHA-256値と件数をローカルメモへ記録します。この時点では読み取りだけで、DBは変更しません。
+
+## 4. 本番移行（今回は実施しない）
+
+バックアップ取得、別DBへの復元テスト、公開差分の承認、移行前スナップショットがすべて完了した後にだけ実施します。
+
+```powershell
+$env:DATABASE_URL = $env:ICHIMOTO_DATABASE_URL
 python migrate_publication_status.py
+Remove-Item Env:DATABASE_URL
 ```
 
-作業ディレクトリが親リポジトリのルートの場合は `python myapp/migrate_publication_status.py` とします。`DATABASE_URL` が未設定ならDBを変更せず終了します。実行中にエラーが起きた場合、PostgreSQLでは列追加と全件更新が同じトランザクションとしてロールバックされます。接続URLはシェル履歴やログへ残さず、作業後に環境変数から除去してください。
+`DATABASE_URL` が未設定ならスクリプトは変更せず終了します。エラー時はPostgreSQLのトランザクションにより列追加と全件更新がロールバックされます。移行は同時に複数端末から実行しません。
 
-## 実行後の確認
+## 5. 移行後の照合（今回は実施しない）
 
-1. スクリプトの成功メッセージを確認する。
-2. `story` テーブルに `is_public` 列が追加されたことを確認する。
-3. 移行前後の `SELECT COUNT(*) FROM story;` が一致することを確認する。
-4. `SELECT COUNT(*) FROM story WHERE is_public IS NOT TRUE;` が `0` であることを確認する。
-5. 同じ移行コマンドをもう一度実行し、「既に存在します」と表示され、件数と公開状態が変わらないことを確認する。
-6. PR #2をマージする。RenderのAuto-Deployが有効なら、マージがそのままデプロイ開始の合図になる。
-7. Auto-Deployが無効なら、Webサービスの「Deploy latest commit」を実行する。
-8. 管理一覧、`/stories`、`/api/stories`、公開作品と非公開作品の個別URLを確認する。
+```powershell
+psql "$env:ICHIMOTO_DATABASE_URL" -c "\copy (SELECT id, title, content FROM story ORDER BY id) TO 'story-after.csv' WITH (FORMAT csv, HEADER true)"
+Get-FileHash -Algorithm SHA256 story-after.csv
+Compare-Object (Get-Content story-before.csv) (Get-Content story-after.csv)
 
-有料WebサービスでPre-Deploy Commandを利用できる場合は、`python migrate_publication_status.py` を設定してからマージする方法も安全です。ビルド後・新コードの起動前に移行が実行され、失敗したデプロイは公開されません。このスクリプトは再実行可能なので、以後のデプロイで実行されても公開状態を上書きしません。
-
-旧バージョンへ切り戻す可能性がある間は、従来の `PUBLIC_STORY_IDS` 環境変数を削除しないでください。
-
-## ローカルSQLiteでの事前確認例
-
-本番DBではなく、バックアップから作成した検証用SQLiteファイルを指定してください。
-
-```shell
-$env:DATABASE_URL = "sqlite:///検証用ファイル.db"
-python migrate_publication_status.py
+psql "$env:ICHIMOTO_DATABASE_URL" -c "SELECT COUNT(*) AS story_count, MIN(id) AS min_id, MAX(id) AS max_id FROM story;"
+psql "$env:ICHIMOTO_DATABASE_URL" -c "SELECT COUNT(*) AS private_count FROM story WHERE is_public IS NOT TRUE;"
 ```
 
-本番DBの変更、PRのマージ、Renderへのデプロイはそれぞれ別作業です。手動移行の場合は必ず「バックアップ → DB移行 → DB検証 → マージ → Render反映」の順で、各段階を確認して進めてください。
+合格条件は次のとおりです。
+
+- `story-before.csv` と `story-after.csv` のSHA-256が一致する。
+- `Compare-Object` が何も出力しない。
+- 移行前後の件数、最小ID、最大IDが一致する。
+- `private_count` が `0` である。
+
+さらに移行スクリプトを再実行し、「既に存在します」と表示されることを確認します。その後、もう一度CSVと公開状態を照合し、変化がないことを確認します。
+
+## 6. 担当分け
+
+### よっちんが実施する操作
+
+- RenderのプランとRecoveryページでPITR／論理バックアップの利用可否を確認する。
+- **Create export**、バックアップのダウンロード、空DBへの復元テストを行う。
+- Render Web Serviceの現在の `PUBLIC_STORY_IDS` を安全に確認する。
+- 新たに公開される作品を確認し、全件公開でよいか判断する。
+- 本番DBのExternal Database URLを、共有せずローカル端末へ入力する。
+- バックアップと復元を確認した後、別の依頼として本番移行の実行を明示的に承認する。
+
+### Codexに任せられる操作
+
+- 移行スクリプト、照合SQL、手順書、テストのレビューと修正。
+- GitHub Actions上の使い捨てPostgreSQLを使った移行テスト。
+- よっちんが共有した**件数や伏せた差分結果**の判定補助。
+- 明示的な承認後の移行コマンド支援。ただし認証情報はチャットへ貼らない。
+
+バックアップと復元テストの確認が完了するまでは、本番DB移行、PRのマージ、Renderへのデプロイを行いません。旧バージョンへ切り戻す可能性がある間は `PUBLIC_STORY_IDS` も削除しません。
+
+## Render公式資料
+
+- [Render Postgres Recovery and Backups](https://render.com/docs/postgresql-backups)
+- [Create and Connect to Render Postgres](https://render.com/docs/postgresql-creating-connecting)
