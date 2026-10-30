@@ -381,10 +381,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 ```
 
-`gh` を使用しない場合はGitHubのPR #2で、HEADが `a538ff0`、Testsが成功、
-mergeableであることを確認してマージします。その後、ローカルで `git fetch origin main` と
-上記の `$releaseSha` 取得・祖先確認を行います。Renderへ指定するのはPRのHEADではなく、
-**マージ後の `main` の `$releaseSha`** です。
+`gh` を使用しない場合はGitHubのPR #2で、変更履歴に移行コードの基準コミット
+`a538ff0` が含まれ、最新HEADのTestsが成功し、mergeableであることを確認して
+マージします。その後、ローカルで `git fetch origin main` と上記の `$releaseSha` 取得・
+祖先確認を行います。Renderへ指定するのはPRのHEADではなく、**マージ後の `main` の
+`$releaseSha`** です。
 
 ### 9.2 本番DB移行
 
