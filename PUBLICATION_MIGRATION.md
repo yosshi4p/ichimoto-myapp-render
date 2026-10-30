@@ -350,6 +350,118 @@ Remove-Item Env:ICHIMOTO_RESTORE_URL -ErrorAction SilentlyContinue
 バックアップとスナップショットは削除せず、既存バックアップとは別に安全な場所へ
 保管します。Gitへ追加しません。
 
+## 9. 本番リリース手順（今回は実施しない）
+
+本番では、**PRをマージする前にRenderの自動デプロイを停止**し、次の順序を守ります。
+
+1. Render Dashboardの対象Web Serviceで **Settings > Auto-Deploy > Off** にする。
+2. PR #2のHEADとテスト成功を確認し、PRをマージする。
+3. マージ後の `main` のコミットSHAを取得する。
+4. そのコミットに含まれる移行スクリプトで本番DBを移行し、移行前後を照合する。
+5. 同じコミットSHAをRenderへ手動デプロイする。
+6. 公開画面、API、管理画面、公開・非公開切り替えを確認する。
+
+自動デプロイを有効にしたままPRをマージすると、DB移行より先に新コードが起動する
+可能性があります。新コードは `story.is_public` を参照するため、この順序を逆にしません。
+
+### 9.1 PRの最終確認とマージ
+
+GitHub CLIを使用できる端末では次を実行します。今回は実行しません。
+
+```powershell
+gh pr view 2 --repo yosshi4p/ichimoto-myapp-render
+gh pr checks 2 --repo yosshi4p/ichimoto-myapp-render
+gh pr merge 2 --repo yosshi4p/ichimoto-myapp-render --merge
+
+git fetch origin main
+$releaseSha = (git rev-parse origin/main).Trim()
+git merge-base --is-ancestor a538ff0 $releaseSha
+if ($LASTEXITCODE -ne 0) {
+    throw "PR #2の最終コミットを含まないmainのため中止しました。"
+}
+```
+
+`gh` を使用しない場合はGitHubのPR #2で、HEADが `a538ff0`、Testsが成功、
+mergeableであることを確認してマージします。その後、ローカルで `git fetch origin main` と
+上記の `$releaseSha` 取得・祖先確認を行います。Renderへ指定するのはPRのHEADではなく、
+**マージ後の `main` の `$releaseSha`** です。
+
+### 9.2 本番DB移行
+
+マージ後の `main` をチェックアウトしたクリーンな作業ディレクトリで、この手順書の
+「2. 移行入力を安全に準備」から「5. 移行後のデータ照合」までを順番に実行します。
+次のすべてが成立した場合だけデプロイへ進みます。
+
+- 移行スクリプトが終了コード0で完了した。
+- `story-before.csv` と `story-after.csv` のSHA-256が一致した。
+- 移行前後の作品件数が一致した。
+- `publication_mismatch_count=0` になった。
+- 作品件数、接続先、実行時刻、`$releaseSha` だけを作業記録へ残した。
+
+本文、接続URL、公開ID一覧、スナップショットの内容はログやGitへ残しません。
+
+### 9.3 Renderへ同じコミットをデプロイ
+
+Render Dashboardの対象Web Serviceで **Deploys > Manual Deploy > Deploy a specific
+commit** を選び、9.1で取得した `$releaseSha` を指定します。ビルドログで同じSHAが
+checkoutされていることを確認し、デプロイ完了まで待ちます。
+
+Render CLIを導入済みの場合は、対象サービスIDを画面に表示・記録しないローカル変数へ
+入力し、次でも実行できます。
+
+```powershell
+$renderServiceId = Read-Host "Render service ID"
+render deploys create $renderServiceId --commit $releaseSha --wait
+if ($LASTEXITCODE -ne 0) {
+    throw "Renderデプロイに失敗しました。旧デプロイは維持したまま原因を確認してください。"
+}
+Remove-Variable renderServiceId
+```
+
+Render CLIまたはAPIで特定コミットをデプロイしても、自動デプロイは自動的には無効に
+なりません。9.1より前にDashboardでOffにしておきます。Dashboardの
+**Deploy a specific commit** は自動デプロイを無効にします。
+
+### 9.4 デプロイ後確認
+
+サービスの公開URLをローカル変数へ入力し、IDや本文を出力せず疎通と公開件数を確認します。
+
+```powershell
+$serviceUrl = (Read-Host "Render service URL").TrimEnd("/")
+$storiesResponse = Invoke-WebRequest -UseBasicParsing "$serviceUrl/stories"
+if ($storiesResponse.StatusCode -ne 200) {
+    throw "/stories の疎通確認に失敗しました。"
+}
+
+$apiStories = @(Invoke-RestMethod "$serviceUrl/api/stories")
+$expectedPublicCount = @(
+    $env:ICHIMOTO_PUBLIC_STORY_IDS.Split(",") |
+        ForEach-Object { $_.Trim() } |
+        Sort-Object -Unique
+).Count
+if ($apiStories.Count -ne $expectedPublicCount) {
+    throw "公開作品件数が移行時の設定と一致しません。"
+}
+
+"stories_status=200"
+"public_story_count=$($apiStories.Count)"
+Remove-Variable serviceUrl, storiesResponse, apiStories, expectedPublicCount
+```
+
+続けて管理画面へログインし、全15作品が管理一覧に存在すること、状態表示が正しいこと、
+テスト用に選んだ1作品を公開・非公開へ切り替えると一覧、API、個別ページへ反映される
+ことを確認します。確認後はその作品を元の公開状態へ戻します。
+
+### 9.5 ロールバック方針
+
+デプロイに失敗した場合、Renderの直前の成功デプロイはそのまま稼働します。デプロイ後の
+不具合では、Render Dashboardの **Deploys** から直前の成功デプロイへRollbackします。
+`PUBLIC_STORY_IDS` は旧コードへのロールバックで必要なため、安定稼働を確認するまでは
+Renderから削除しません。追加した `is_public` 列もロールバック時に削除しません。
+
+作品件数や本文ハッシュが変化した場合はデプロイを中止し、書き込みを止めたうえで
+バックアップから新しいDBへ復元します。既存の本番DBやバックアップを上書きしません。
+
 ## 今回の作業範囲
 
 Codexが行うのは、移行スクリプト、テスト、GitHub Actions、手順書、PR本文の更新と
@@ -365,3 +477,5 @@ Codexが行うのは、移行スクリプト、テスト、GitHub Actions、手�
 
 - [Render Postgres Recovery and Backups](https://render.com/docs/postgresql-backups)
 - [Create and Connect to Render Postgres](https://render.com/docs/postgresql-creating-connecting)
+- [Deploying on Render](https://render.com/docs/deploys)
+- [Render Rollbacks](https://render.com/docs/rollbacks)
