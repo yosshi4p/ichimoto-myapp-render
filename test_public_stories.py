@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 _temporary_directory = tempfile.TemporaryDirectory()
@@ -24,19 +25,6 @@ class PublicStoryVisibilityTest(unittest.TestCase):
         with app.app_context():
             db.drop_all()
             db.create_all()
-            db.session.add_all([
-                Story(
-                    id=1,
-                    title="公開作品",
-                    content="公開作品の本文",
-                ),
-                Story(
-                    id=2,
-                    title="非公開作品",
-                    content="非公開作品の本文",
-                ),
-            ])
-            db.session.commit()
 
     @classmethod
     def tearDownClass(cls):
@@ -59,6 +47,23 @@ class PublicStoryVisibilityTest(unittest.TestCase):
 
     def setUp(self):
         os.environ["PUBLIC_STORY_IDS"] = "1"
+        with app.app_context():
+            db.session.query(Story).delete()
+            db.session.add_all([
+                Story(
+                    id=1,
+                    title="公開作品",
+                    content="公開作品の本文",
+                    is_public=True,
+                ),
+                Story(
+                    id=2,
+                    title="非公開作品",
+                    content="非公開作品の本文",
+                    is_public=False,
+                ),
+            ])
+            db.session.commit()
         self.client = app.test_client()
 
     def login_for_edit(self):
@@ -68,10 +73,102 @@ class PublicStoryVisibilityTest(unittest.TestCase):
 
     def edit_form(self, **changes):
         with self.client.session_transaction() as session:
-            token = session["edit_csrf_token"]
+            token = session["admin_csrf_token"]
         form = {"csrf_token": token, "title": "変更後", "content": "変更した本文"}
         form.update(changes)
         return form
+
+    def login_for_admin_list(self):
+        with self.client.session_transaction() as session:
+            session["admin_logged_in"] = True
+        return self.client.get("/admin/list")
+
+    def publication_form(self, action):
+        with self.client.session_transaction() as session:
+            token = session["admin_csrf_token"]
+        return {"csrf_token": token, "action": action}
+
+    def test_admin_list_shows_status_and_matching_actions(self):
+        response = self.login_for_admin_list()
+        response_text = response.get_data(as_text=True)
+        self.assertIn("公開中", response_text)
+        self.assertIn("非公開", response_text)
+        self.assertIn("非公開にする", response_text)
+        self.assertIn("公開する", response_text)
+
+    def test_publication_update_requires_login_and_post(self):
+        response = self.client.post(
+            "/admin/publication/1",
+            data={"action": "unpublish"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.location.endswith("/admin/login"))
+        self.assertEqual(self.client.get("/admin/publication/1").status_code, 405)
+
+    def test_publication_update_rejects_invalid_csrf_and_action(self):
+        self.login_for_admin_list()
+        self.assertEqual(
+            self.client.post(
+                "/admin/publication/1",
+                data={"action": "unpublish"},
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/admin/publication/1",
+                data={"csrf_token": "wrong", "action": "unpublish"},
+            ).status_code,
+            400,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/admin/publication/1",
+                data=self.publication_form("delete"),
+            ).status_code,
+            400,
+        )
+        with app.app_context():
+            self.assertTrue(db.session.get(Story, 1).is_public)
+
+    def test_publish_and_unpublish_affect_all_public_routes(self):
+        self.login_for_admin_list()
+
+        response = self.client.post(
+            "/admin/publication/1",
+            data=self.publication_form("unpublish"),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("公開作品", self.client.get("/stories").get_data(as_text=True))
+        self.assertEqual(self.client.get("/api/stories").get_json(), [])
+        self.assertEqual(self.client.get("/stories/1").status_code, 404)
+
+        response = self.client.post(
+            "/admin/publication/2",
+            data=self.publication_form("publish"),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("非公開作品", self.client.get("/stories").get_data(as_text=True))
+        self.assertEqual(self.client.get("/api/stories").get_json()[0]["id"], 2)
+        self.assertEqual(self.client.get("/stories/2").status_code, 200)
+
+    def test_new_admin_and_ai_stories_start_private(self):
+        with self.client.session_transaction() as session:
+            session["admin_logged_in"] = True
+        response = self.client.post(
+            "/admin/add",
+            data={"title": "管理登録", "content": "管理登録本文"},
+        )
+        self.assertEqual(response.status_code, 302)
+
+        with patch("app.generate_story", return_value="あ" * 400):
+            response = self.client.post("/generate", data={"theme": "AI登録"})
+        self.assertEqual(response.status_code, 200)
+
+        with app.app_context():
+            new_stories = Story.query.filter(Story.id > 2).order_by(Story.id).all()
+            self.assertEqual(len(new_stories), 2)
+            self.assertTrue(all(story.is_public is False for story in new_stories))
 
     def test_edit_requires_login_for_get_and_post(self):
         for method in (self.client.get, self.client.post):
@@ -220,8 +317,8 @@ class PublicStoryVisibilityTest(unittest.TestCase):
         self.assertIn("公開作品", response_text)
         self.assertIn("非公開作品", response_text)
 
-    def test_invalid_or_empty_public_ids_publish_nothing(self):
-        for public_ids in ("", "invalid, -2"):
+    def test_environment_variable_no_longer_controls_visibility(self):
+        for public_ids in ("", "2", "invalid, -2"):
             with self.subTest(public_ids=public_ids):
                 os.environ["PUBLIC_STORY_IDS"] = public_ids
 
@@ -229,12 +326,12 @@ class PublicStoryVisibilityTest(unittest.TestCase):
                 api_response = self.client.get("/api/stories")
                 detail_response = self.client.get("/stories/1")
 
-                self.assertNotIn(
+                self.assertIn(
                     "公開作品",
                     stories_response.get_data(as_text=True),
                 )
-                self.assertEqual(api_response.get_json(), [])
-                self.assertEqual(detail_response.status_code, 404)
+                self.assertEqual(api_response.get_json()[0]["id"], 1)
+                self.assertEqual(detail_response.status_code, 200)
 
 
 if __name__ == "__main__":
