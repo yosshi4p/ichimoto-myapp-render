@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 _ID_BATCH_SIZE = 500
 _MAX_STORY_ID = 9_223_372_036_854_775_807
+_STARTUP_MIGRATION_ENV = "RUN_PUBLICATION_MIGRATION_ON_STARTUP"
 
 
 class PublicationMigrationError(RuntimeError):
@@ -161,6 +162,15 @@ def migrate_publication_status(
             raise
 
     return True
+
+
+def migrate_publication_status_on_startup(engine: Engine) -> bool | None:
+    """Run the migration only when an explicit, server-side startup flag is set."""
+    if os.environ.get(_STARTUP_MIGRATION_ENV) != "1":
+        return None
+
+    public_story_ids = parse_public_story_ids(os.environ.get("PUBLIC_STORY_IDS"))
+    return migrate_publication_status(engine, public_story_ids)
 
 
 def _normalize_database_url(database_url: str) -> str:

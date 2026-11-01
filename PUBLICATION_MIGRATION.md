@@ -401,6 +401,28 @@ if ($LASTEXITCODE -ne 0) {
 
 本文、接続URL、公開ID一覧、スナップショットの内容はログやGitへ残しません。
 
+#### Free Web Service: 内部DATABASE_URLを使う起動時移行
+
+Free Web ServiceではShellとPre-deploy Commandを利用できません。その場合は、外部DB URLを
+ローカルへ持ち出さず、Web Serviceに既に設定されている `DATABASE_URL` と
+`PUBLIC_STORY_IDS` を使う起動時移行を使用します。移行を起動する公開HTTPルートは
+存在しません。
+
+1. 自動デプロイを停止した状態で、Web ServiceのEnvironmentへ
+   `RUN_PUBLICATION_MIGRATION_ON_STARTUP=1` を追加する。
+2. マージ済みのリリースコミットを手動デプロイする。
+3. Deploy logsに `publication_status_startup_migration=applied` が1回以上出ることを確認する。
+   複数プロセスで起動しても、最初の1回以外は安全な
+   `publication_status_startup_migration=noop` になる。
+4. 作品件数、公開状態、管理画面を確認する。
+5. `RUN_PUBLICATION_MIGRATION_ON_STARTUP` を削除し、同じリリースコミットをもう一度手動
+   デプロイする。その後に自動デプロイを元へ戻す。
+
+フラグが未設定または値が `1` 以外なら移行処理は一切実行しません。フラグが有効でも、
+`PUBLIC_STORY_IDS` が不正、対象IDが存在しない、または `story` テーブルが存在しない場合は
+起動に失敗し、既存デプロイを稼働させたままDB変更をロールバックします。列が既に存在する
+場合はno-opとなり、管理画面で変更済みの公開状態を上書きしません。
+
 ### 9.3 Renderへ同じコミットをデプロイ
 
 Render Dashboardの対象Web Serviceで **Deploys > Manual Deploy > Deploy a specific

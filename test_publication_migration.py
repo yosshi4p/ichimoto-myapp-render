@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -264,6 +266,122 @@ class PublicStoryIdsParserTest(unittest.TestCase):
             with self.subTest(value_type=type(raw_value).__name__):
                 with self.assertRaises(ValueError):
                     parse_public_story_ids(raw_value)
+
+
+class StartupPublicationMigrationTest(unittest.TestCase):
+    def test_startup_migration_is_disabled_by_default(self):
+        engine = Mock()
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                migration,
+                "migrate_publication_status",
+            ) as migrate_mock,
+        ):
+            result = migration.migrate_publication_status_on_startup(engine)
+
+        self.assertIsNone(result)
+        migrate_mock.assert_not_called()
+
+    def test_app_startup_migrates_legacy_database_without_http_trigger(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "startup-legacy.db"
+            database_url = f"sqlite:///{database_path.as_posix()}"
+            engine = create_engine(database_url)
+            try:
+                with engine.begin() as connection:
+                    connection.execute(text(
+                        "CREATE TABLE story ("
+                        "id INTEGER PRIMARY KEY, title VARCHAR(200), "
+                        "content TEXT NOT NULL)"
+                    ))
+                    connection.execute(text(
+                        "INSERT INTO story (id, title, content) VALUES "
+                        "(2, 'A', 'body-a'), (7, 'B', 'body-b'), "
+                        "(11, 'C', 'body-c')"
+                    ))
+            finally:
+                engine.dispose()
+
+            environment = os.environ.copy()
+            environment.update({
+                "DATABASE_URL": database_url,
+                "PUBLIC_STORY_IDS": "2,11",
+                "RUN_PUBLICATION_MIGRATION_ON_STARTUP": "1",
+            })
+            completed = subprocess.run(
+                [sys.executable, "-c", "import app"],
+                cwd=Path(__file__).resolve().parent,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+            engine = create_engine(database_url)
+            try:
+                self.assertIn(
+                    "is_public",
+                    {
+                        column["name"]
+                        for column in inspect(engine).get_columns("story")
+                    },
+                )
+                with engine.connect() as connection:
+                    publication_rows = connection.execute(text(
+                        "SELECT id, is_public FROM story ORDER BY id"
+                    )).all()
+            finally:
+                engine.dispose()
+
+            self.assertEqual(
+                [(story_id, bool(is_public)) for story_id, is_public in publication_rows],
+                [(2, True), (7, False), (11, True)],
+            )
+
+    def test_startup_migration_uses_existing_public_story_ids(self):
+        engine = Mock()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "RUN_PUBLICATION_MIGRATION_ON_STARTUP": "1",
+                    "PUBLIC_STORY_IDS": "2,11",
+                },
+                clear=True,
+            ),
+            patch.object(
+                migration,
+                "migrate_publication_status",
+                return_value=True,
+            ) as migrate_mock,
+        ):
+            result = migration.migrate_publication_status_on_startup(engine)
+
+        self.assertTrue(result)
+        migrate_mock.assert_called_once_with(engine, {2, 11})
+
+    def test_startup_migration_rejects_invalid_public_story_ids(self):
+        engine = Mock()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "RUN_PUBLICATION_MIGRATION_ON_STARTUP": "1",
+                    "PUBLIC_STORY_IDS": "invalid",
+                },
+                clear=True,
+            ),
+            patch.object(
+                migration,
+                "migrate_publication_status",
+            ) as migrate_mock,
+        ):
+            with self.assertRaises(ValueError):
+                migration.migrate_publication_status_on_startup(engine)
+
+        migrate_mock.assert_not_called()
 
 
 class PublicationMigrationMainTest(unittest.TestCase):

@@ -19,6 +19,7 @@ from flask_sqlalchemy import SQLAlchemy
 
 # OpenAI SDK（公式）
 from openai import OpenAI
+from migrate_publication_status import migrate_publication_status_on_startup
 
 
 # =========================================================
@@ -71,8 +72,16 @@ class Story(db.Model):
     )
 
 
-# テーブルがなければ作成
+# Freeプランでも既存の内部DATABASE_URLを使って安全に一度だけ移行できる。
+# HTTPルートは公開せず、Renderのサーバー側環境変数で明示した起動時だけ実行する。
 with app.app_context():
+    startup_migration_result = migrate_publication_status_on_startup(db.engine)
+    if startup_migration_result is True:
+        app.logger.warning("publication_status_startup_migration=applied")
+    elif startup_migration_result is False:
+        app.logger.info("publication_status_startup_migration=noop")
+
+    # テーブルがなければ作成
     db.create_all()
 
 
