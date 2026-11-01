@@ -63,6 +63,12 @@ class Story(db.Model):
     twist = db.Column(db.String(200))
     forbidden = db.Column(db.String(200))
     content = db.Column(db.Text, nullable=False)
+    is_public = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default=db.false(),
+    )
 
 
 # テーブルがなければ作成
@@ -227,6 +233,7 @@ def admin_logout():
         "admin_logged_in",
         None,
     )
+    session.pop("admin_csrf_token", None)
 
     return redirect(
         url_for("admin_login")
@@ -321,14 +328,25 @@ def add_story():
 # 作品編集（既存の作品を同じIDで更新）
 # =========================================================
 
+def _admin_csrf_token() -> str:
+    if "admin_csrf_token" not in session:
+        session["admin_csrf_token"] = secrets.token_hex(32)
+    return session["admin_csrf_token"]
+
+
+def _validate_admin_csrf_token() -> None:
+    submitted_token = request.form.get("csrf_token", "")
+    session_token = session.get("admin_csrf_token", "")
+    if not session_token or not hmac.compare_digest(submitted_token, session_token):
+        abort(400)
+
 @app.route("/admin/edit/<int:story_id>", methods=["GET", "POST"])
 def edit_story(story_id):
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin_login"))
 
     story = db.get_or_404(Story, story_id)
-    if "edit_csrf_token" not in session:
-        session["edit_csrf_token"] = secrets.token_hex(32)
+    csrf_token = _admin_csrf_token()
 
     fields = {
         "title": 200, "theme": 100, "genre": 100,
@@ -339,9 +357,7 @@ def edit_story(story_id):
     error = None
 
     if request.method == "POST":
-        token = request.form.get("csrf_token", "")
-        if not hmac.compare_digest(token, session["edit_csrf_token"]):
-            abort(400)
+        _validate_admin_csrf_token()
         form = {name: request.form.get(name, "").strip() for name in form}
         if not form["title"] or not form["content"]:
             error = "タイトルと小説本文を入力してください。"
@@ -356,7 +372,7 @@ def edit_story(story_id):
 
     return render_template(
         "edit_story.html", story=story, form=form, error=error,
-        csrf_token=session["edit_csrf_token"],
+        csrf_token=csrf_token,
     ), (400 if error else 200)
 
 
@@ -378,27 +394,41 @@ def admin_list():
         Story.id.desc()
     ).all()
 
-    return render_template("admin_list.html", stories=stories)
+    return render_template(
+        "admin_list.html",
+        stories=stories,
+        csrf_token=_admin_csrf_token(),
+    )
+
+
+# =========================================================
+# 作品の公開・非公開切り替え
+# =========================================================
+
+@app.post("/admin/publication/<int:story_id>")
+def update_story_publication(story_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin_login"))
+
+    _validate_admin_csrf_token()
+    story = db.get_or_404(Story, story_id)
+    action = request.form.get("action", "")
+    if action not in {"publish", "unpublish"}:
+        abort(400)
+
+    story.is_public = action == "publish"
+    db.session.commit()
+    flash("作品を公開しました。" if story.is_public else "作品を非公開にしました。")
+    return redirect(url_for("admin_list"))
 
 
 # =========================================================
 # 公開用 400字小説一覧
 # =========================================================
 
-def _get_public_story_ids() -> set[int]:
-    """環境変数から公開を許可した作品IDを取得する。"""
-    return {
-        int(value.strip())
-        for value in os.getenv("PUBLIC_STORY_IDS", "").split(",")
-        if value.strip().isdigit()
-    }
-
-
 def _public_stories_query():
     """公開作品だけを対象にしたクエリを返す。"""
-    return Story.query.filter(
-        Story.id.in_(_get_public_story_ids())
-    )
+    return Story.query.filter(Story.is_public.is_(True))
 
 @app.route("/stories")
 def public_stories():

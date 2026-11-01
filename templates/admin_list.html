@@ -4,7 +4,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DB登録作品一覧</title>
 <style>
-body{font-family:sans-serif;background:#f7f7f5;color:#333}main{max-width:900px;margin:32px auto;padding:20px}article{background:white;border:1px solid #ddd;border-radius:10px;padding:24px;margin:20px 0}.content{white-space:pre-wrap;line-height:1.8}.message{color:#165c35}
+body{font-family:sans-serif;background:#f7f7f5;color:#333}main{max-width:900px;margin:32px auto;padding:20px}article{background:white;border:1px solid #ddd;border-radius:10px;padding:24px;margin:20px 0}.content{white-space:pre-wrap;line-height:1.8}.message{color:#165c35}.status{font-weight:bold}.status.public{color:#165c35}.status.private{color:#777}.actions{display:flex;align-items:center;gap:16px}.actions form{margin:0}.actions button{padding:8px 14px;cursor:pointer}
 </style>
 <main>
 <h1>DB登録作品一覧</h1>
@@ -15,8 +15,16 @@ body{font-family:sans-serif;background:#f7f7f5;color:#333}main{max-width:900px;m
 <p>ID: {{ story.id }}</p>
 <h2>{{ story.title or '無題' }}</h2>
 <p>テーマ: {{ story.theme or '' }} ／ ジャンル: {{ story.genre or '' }}</p>
+<p class="status {{ 'public' if story.is_public else 'private' }}">{{ '公開中' if story.is_public else '非公開' }}</p>
 <p class="content">{{ story.content }}</p>
+<div class="actions">
 <a href="{{ url_for('edit_story', story_id=story.id) }}">この作品を編集</a>
+<form method="post" action="{{ url_for('update_story_publication', story_id=story.id) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<input type="hidden" name="action" value="{{ 'unpublish' if story.is_public else 'publish' }}">
+<button type="submit">{{ '非公開にする' if story.is_public else '公開する' }}</button>
+</form>
+</div>
 </article>
 {% else %}<p>登録された作品はありません。</p>{% endfor %}
 </main>
