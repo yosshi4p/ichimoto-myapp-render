@@ -348,7 +348,10 @@ class PublicStoryVisibilityTest(unittest.TestCase):
         response = self.client.get("/stories/1")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("公開作品の本文", response.get_data(as_text=True))
+        response_text = response.get_data(as_text=True)
+        self.assertIn("公開作品の本文", response_text)
+        self.assertIn('href="https://ichimoto-yoshio.com/"', response_text)
+        self.assertNotIn('href="https://www.ichimoto-yoshio.com/"', response_text)
 
     def test_private_story_detail_returns_not_found(self):
         response = self.client.get("/stories/2")
