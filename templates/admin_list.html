@@ -4,7 +4,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DB登録作品一覧</title>
 <style>
-body{font-family:sans-serif;background:#f7f7f5;color:#333}main{max-width:900px;margin:32px auto;padding:20px}article{background:white;border:1px solid #ddd;border-radius:10px;padding:24px;margin:20px 0}.content{white-space:pre-wrap;line-height:1.8}.message{color:#165c35}.status{font-weight:bold}.status.public{color:#165c35}.status.private{color:#777}.actions{display:flex;align-items:center;gap:16px}.actions form{margin:0}.actions button{padding:8px 14px;cursor:pointer}
+body{font-family:sans-serif;background:#f7f7f5;color:#333}main{max-width:900px;margin:32px auto;padding:20px}article{background:white;border:1px solid #ddd;border-radius:10px;padding:24px;margin:20px 0}.content{white-space:pre-wrap;line-height:1.8}.message{color:#165c35}.status{font-weight:bold}.status.public{color:#165c35}.status.private{color:#777}.actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.actions form{margin:0}.actions button{padding:8px 14px;cursor:pointer}.delete-button{color:#a00;border-color:#a00}
 </style>
 <main>
 <h1>DB登録作品一覧</h1>
@@ -23,6 +23,9 @@ body{font-family:sans-serif;background:#f7f7f5;color:#333}main{max-width:900px;m
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 <input type="hidden" name="action" value="{{ 'unpublish' if story.is_public else 'publish' }}">
 <button type="submit">{{ '非公開にする' if story.is_public else '公開する' }}</button>
+</form>
+<form method="get" action="{{ url_for('confirm_story_deletion', story_id=story.id) }}">
+<button class="delete-button" type="submit">削除</button>
 </form>
 </div>
 </article>

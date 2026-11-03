@@ -432,6 +432,36 @@ def update_story_publication(story_id):
 
 
 # =========================================================
+# 作品削除（確認画面を経由し、POSTでのみ実行）
+# =========================================================
+
+@app.get("/admin/delete/<int:story_id>")
+def confirm_story_deletion(story_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin_login"))
+
+    story = db.get_or_404(Story, story_id)
+    return render_template(
+        "confirm_story_deletion.html",
+        story=story,
+        csrf_token=_admin_csrf_token(),
+    )
+
+
+@app.post("/admin/delete/<int:story_id>")
+def delete_story(story_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin_login"))
+
+    _validate_admin_csrf_token()
+    story = db.get_or_404(Story, story_id)
+    db.session.delete(story)
+    db.session.commit()
+    flash("作品を削除しました。")
+    return redirect(url_for("admin_list"))
+
+
+# =========================================================
 # 公開用 400字小説一覧
 # =========================================================
 

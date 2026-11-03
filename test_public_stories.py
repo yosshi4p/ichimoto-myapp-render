@@ -88,6 +88,11 @@ class PublicStoryVisibilityTest(unittest.TestCase):
             token = session["admin_csrf_token"]
         return {"csrf_token": token, "action": action}
 
+    def deletion_form(self):
+        with self.client.session_transaction() as session:
+            token = session["admin_csrf_token"]
+        return {"csrf_token": token}
+
     def test_admin_list_shows_status_and_matching_actions(self):
         response = self.login_for_admin_list()
         response_text = response.get_data(as_text=True)
@@ -95,6 +100,8 @@ class PublicStoryVisibilityTest(unittest.TestCase):
         self.assertIn("非公開", response_text)
         self.assertIn("非公開にする", response_text)
         self.assertIn("公開する", response_text)
+        self.assertIn("削除", response_text)
+        self.assertIn("/admin/delete/1", response_text)
 
     def test_publication_update_requires_login_and_post(self):
         response = self.client.post(
@@ -151,6 +158,48 @@ class PublicStoryVisibilityTest(unittest.TestCase):
         self.assertIn("非公開作品", self.client.get("/stories").get_data(as_text=True))
         self.assertEqual(self.client.get("/api/stories").get_json()[0]["id"], 2)
         self.assertEqual(self.client.get("/stories/2").status_code, 200)
+
+    def test_deletion_requires_login_confirmation_and_post(self):
+        for method in (self.client.get, self.client.post):
+            response = method("/admin/delete/1")
+            self.assertEqual(response.status_code, 302)
+            self.assertTrue(response.location.endswith("/admin/login"))
+
+        self.login_for_admin_list()
+        response = self.client.get("/admin/delete/1")
+        response_text = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("作品を削除しますか？", response_text)
+        self.assertIn("公開作品", response_text)
+        self.assertIn('method="post"', response_text)
+        self.assertIn('name="csrf_token"', response_text)
+        with app.app_context():
+            self.assertIsNotNone(db.session.get(Story, 1))
+
+    def test_deletion_rejects_missing_or_invalid_csrf(self):
+        self.login_for_admin_list()
+        for data in ({}, {"csrf_token": "wrong"}):
+            response = self.client.post("/admin/delete/1", data=data)
+            self.assertEqual(response.status_code, 400)
+        with app.app_context():
+            self.assertIsNotNone(db.session.get(Story, 1))
+
+    def test_deletion_removes_story_from_all_routes(self):
+        self.login_for_admin_list()
+        response = self.client.post("/admin/delete/1", data=self.deletion_form())
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.location.endswith("/admin/list"))
+
+        admin_response = self.client.get(response.location).get_data(as_text=True)
+        self.assertIn("作品を削除しました。", admin_response)
+        self.assertNotIn(">公開作品</h2>", admin_response)
+        self.assertIn(">非公開作品</h2>", admin_response)
+        self.assertNotIn("公開作品", self.client.get("/stories").get_data(as_text=True))
+        self.assertEqual(self.client.get("/api/stories").get_json(), [])
+        self.assertEqual(self.client.get("/stories/1").status_code, 404)
+        with app.app_context():
+            self.assertIsNone(db.session.get(Story, 1))
+            self.assertIsNotNone(db.session.get(Story, 2))
 
     def test_new_admin_and_ai_stories_start_private(self):
         with self.client.session_transaction() as session:
